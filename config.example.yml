@@ -13,8 +13,7 @@ onyx:
 # In the Docker image /state is the volume for it.
 state_path: /state/onyx-folder-sync.db
 
-# Settings for all roots. Every key is optional; the values shown are the defaults,
-# except extract_memory_mb (see below).
+# Settings for all roots. Every key is optional; the values shown are the defaults.
 defaults:
   # Files larger than this are skipped (too-large).
   max_file_mb: 20
@@ -28,7 +27,6 @@ defaults:
   # Time limit for extracting one file.
   extract_timeout_seconds: 120
   # Address space limit for the extraction process (Linux and macOS only).
-  # Address space limit for the extraction process (Linux and macOS).
   extract_memory_mb: 2048
   # Replaces the built-in extension list when set (it does not add to it).
   # Built-in list: pdf, docx, pptx, xlsx, html, htm, eml, epub, txt, md, csv, tsv.
