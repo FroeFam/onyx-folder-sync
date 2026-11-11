@@ -24,4 +24,9 @@ RUN useradd --create-home --uid 1000 app \
 USER app
 WORKDIR /home/app
 
+# Mount the YAML config at /config/config.yml (or override the variable).
+# Keep /state on a local disk, not a network share.
+ENV ONYX_FOLDER_SYNC_CONFIG=/config/config.yml
+VOLUME /state
+
 ENTRYPOINT ["onyx-folder-sync"]
