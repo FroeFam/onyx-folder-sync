@@ -52,6 +52,30 @@ def test_i2_file_that_reappears_resets_the_count(env: Env) -> None:
     assert "flaky.txt" in env.onyx_content()
 
 
+def test_i2_reappearing_changed_file_resets_the_count_even_when_its_push_fails(env: Env) -> None:
+    env.tree.file("flaky.txt", "flaky")
+    env.tree.file("other.txt", "other")
+    env.run()
+    mark = env.mark()
+
+    env.tree.remove("flaky.txt")
+    env.run()
+    assert env.documents()["flaky.txt"].missing_count == 1
+
+    # Back with new content, and every attempt to push it fails.
+    env.tree.file("flaky.txt", "flaky, edited")
+    env.fake.fail_next("POST", "/onyx-api/ingestion$", 500, times=3)
+    report = env.run()
+    assert report.roots[0].failed == 1
+    assert env.documents()["flaky.txt"].missing_count == 0
+
+    env.tree.remove("flaky.txt")
+    env.run()
+    assert env.documents()["flaky.txt"].missing_count == 1
+    assert env.delete_ids(mark) == []
+    assert "flaky.txt" in env.onyx_content()
+
+
 def test_i2_one_walk_without_the_file_never_deletes_however_many_files(env: Env) -> None:
     rels = env.tree.files(8)
     env.tree.file("anchor.txt", "anchor")

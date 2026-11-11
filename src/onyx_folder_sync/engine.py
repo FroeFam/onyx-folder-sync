@@ -549,6 +549,10 @@ def _diff_skipped_and_missing(deps: SyncDeps, options: SyncOptions, run: RootRun
     ]
     if returned and not options.dry_run:
         deps.state.clear_missing(root_id, returned)
+    # Later steps of this run copy these rows (push attempt, stored error);
+    # a stale count there would undo the reset and break "two consecutive".
+    for rel_path in returned:
+        run.documents[rel_path] = replace(run.documents[rel_path], missing_count=0)
 
     absent: list[DocumentRecord] = []
     for rel_path, old in run.documents.items():
