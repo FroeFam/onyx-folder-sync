@@ -10,6 +10,9 @@ FROM python:${PYTHON_TAG}-slim
 
 COPY --from=builder /install /usr/local
 
+# /data is the mount point for the folders to index. The tool only reads it
+# (mount it read-only), so it stays root-owned. /state holds the SQLite
+# state database and must be writable by the app user.
 RUN useradd --create-home --uid 1000 app \
     && mkdir /state /data \
     && chown app:app /state
