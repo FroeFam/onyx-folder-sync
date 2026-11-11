@@ -1,0 +1,41 @@
+[project]
+name = "onyx-folder-sync"
+version = "0.0.0"
+description = "Keeps local or mounted folders in sync with an Onyx knowledge base through the Onyx Ingestion API."
+authors = [{ name = "FroeFam" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+dependencies = []
+
+[project.scripts]
+onyx-folder-sync = "onyx_folder_sync.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "ruff>=0.17",
+    "mypy>=1.18",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "B", "UP", "S", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S603"]

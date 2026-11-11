@@ -1,0 +1,37 @@
+name: Main Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: main-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: read
+
+jobs:
+  build:
+    uses: FroeFam/ci-pipeline/.github/workflows/build-test.yml@v1
+    with:
+      language: python
+      python-version: '3.12'
+      python-matrix: '["3.12","3.13","3.14"]'
+      package-manager: uv
+      format-command: 'uv run --locked ruff format --check .'
+      typecheck-command: 'uv run --locked mypy'
+    secrets: inherit
+
+  release:
+    needs: build
+    uses: FroeFam/ci-pipeline/.github/workflows/release.yml@v1
+    with:
+      registry: ghcr
+      initial-version: 0.1.0
+      images: '[{"name":"onyx-folder-sync","dockerfile":"Dockerfile","context":".","platforms":["linux/amd64","linux/arm64"],"title":"Onyx Folder Sync"}]'
+    secrets: inherit
