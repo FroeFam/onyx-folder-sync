@@ -1,0 +1,22 @@
+name: Dependabot Auto Merge
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  automerge:
+    uses: FroeFam/ci-pipeline/.github/workflows/automerge.yml@v1
+    with:
+      automerge-client-id: ${{ vars.AUTOMERGE_APP_CLIENT_ID }}
+    secrets: inherit

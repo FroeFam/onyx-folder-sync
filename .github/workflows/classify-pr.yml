@@ -1,0 +1,17 @@
+name: Classify PR
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  classify:
+    uses: FroeFam/ci-pipeline/.github/workflows/classify.yml@v1
+    with:
+      anthropic-model: ${{ vars.ANTHROPIC_MODEL }}
+    secrets: inherit
