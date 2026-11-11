@@ -101,7 +101,7 @@ YAML. See `config.example.yml` for a commented file. Unknown keys are rejected.
 | `defaults.max_delete_fraction` | 0.25 | Delete guard threshold, see Safety. |
 | `defaults.settle_minutes` | 5 | Files modified more recently are left for the next run (`settling`). |
 | `defaults.extract_timeout_seconds` | 120 | Time limit for extracting one file. |
-| `defaults.extract_memory_mb` | 1024 | Address space limit for the extraction process (Linux and macOS). In the Docker image, html extraction failed at 1024 and worked at 2048, so `config.example.yml` sets 2048. Run `extract-report` on your files to check. |
+| `defaults.extract_memory_mb` | 2048 | Address space limit for the extraction process (Linux and macOS). This is address space, not resident memory: in the Docker image html extraction failed at 1024 and worked at 2048. Run `extract-report` on your files to check. |
 | `defaults.extensions` | built-in list | Replaces the built-in list when set. |
 | `roots[].name` | required | Unique name (compared case-insensitively). |
 | `roots[].path` | required | Folder to index. Roots must not be equal, nested or overlapping. |

@@ -114,7 +114,9 @@ class Defaults(_Strict):
     max_delete_fraction: float = Field(default=0.25, ge=0, le=1)
     settle_minutes: float = Field(default=5, ge=0)
     extract_timeout_seconds: float = Field(default=120, gt=0)
-    extract_memory_mb: int = Field(default=1024, gt=0)
+    # An address space limit, not resident memory. The extraction libraries
+    # reserve more than 1 GB of address space at import, so 1024 fails.
+    extract_memory_mb: int = Field(default=2048, gt=0)
     # None means DEFAULT_EXTENSIONS. A list replaces the built-in list.
     extensions: tuple[str, ...] | None = None
 

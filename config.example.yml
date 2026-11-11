@@ -28,9 +28,7 @@ defaults:
   # Time limit for extracting one file.
   extract_timeout_seconds: 120
   # Address space limit for the extraction process (Linux and macOS only).
-  # The default is 1024, but in the Docker image (linux/amd64) html, docx, pptx,
-  # xlsx, eml and epub files failed at 1024 and worked at 2048, so this example
-  # sets 2048. Run extract-report to check your files.
+  # Address space limit for the extraction process (Linux and macOS).
   extract_memory_mb: 2048
   # Replaces the built-in extension list when set (it does not add to it).
   # Built-in list: pdf, docx, pptx, xlsx, html, htm, eml, epub, txt, md, csv, tsv.
