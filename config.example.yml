@@ -1,0 +1,45 @@
+# Example configuration for onyx-folder-sync.
+# The API token never goes in this file. Set ONYX_TOKEN, or set ONYX_TOKEN_FILE
+# to the path of a file that holds the token. A config file that contains a key
+# with "token" in its name is rejected.
+
+onyx:
+  # Base URL of your Onyx installation (the tool calls <url>/api/...).
+  url: https://onyx.example.com
+  # Pause between two document pushes, in seconds. Default 1.
+  request_pause_seconds: 1
+
+# SQLite state database. Must be on a local disk, not a network share.
+# In the Docker image /state is the volume for it.
+state_path: /state/onyx-folder-sync.db
+
+# Settings for all roots. Every key is optional; the values shown are the defaults.
+defaults:
+  # Files larger than this are skipped (too-large).
+  max_file_mb: 20
+  # Extracted text longer than this is skipped (text-too-large).
+  max_text_chars: 2000000
+  # A run that would delete more than this fraction of a root's documents
+  # (and more than 10 documents) deletes nothing and exits with code 3.
+  max_delete_fraction: 0.25
+  # Files modified within the last N minutes are left for the next run.
+  settle_minutes: 5
+  # Time limit for extracting one file.
+  extract_timeout_seconds: 120
+  # Address space limit for the extraction process (Linux and macOS only).
+  extract_memory_mb: 2048
+  # Replaces the built-in extension list when set (it does not add to it).
+  # Built-in list: pdf, docx, pptx, xlsx, html, htm, eml, epub, txt, md, csv, tsv.
+  # extensions: [pdf, docx]
+
+roots:
+  # Each root gets its own Onyx connector entry. Root paths must not be equal,
+  # nested or overlapping, and names must be unique (case-insensitive).
+  - name: onedrive
+    path: /data/onedrive
+    # Glob patterns (gitignore syntax) for files and folders to leave out.
+    exclude:
+      - "2FA Backup codes/**"
+    # Optional. Becomes the link of each document in Onyx. {relpath} is the
+    # path relative to the root, URL-encoded per path segment.
+    link_template: "file:///data/onedrive/{relpath}"

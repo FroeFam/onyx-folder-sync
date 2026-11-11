@@ -1,0 +1,2 @@
+# Sample files are byte-exact fixtures (hand-written PDFs have xref offsets).
+tests/samples/* -text
