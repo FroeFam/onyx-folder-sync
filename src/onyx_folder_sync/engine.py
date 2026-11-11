@@ -28,6 +28,7 @@ from onyx_folder_sync.interfaces import (
     OnyxError,
     OnyxRequestError,
     OnyxTransportError,
+    PathFilter,
     RootUnavailableError,
     StateError,
     SyncDeps,
@@ -100,6 +101,7 @@ class RootRun:
     pending: list[PendingDelete] = field(default_factory=list)
     # Documents in Onyx per state when the run started; the delete guard's base.
     documents_at_start: int = 0
+    path_filter: PathFilter | None = None
 
     @property
     def total_documents(self) -> int:
@@ -305,11 +307,8 @@ def walk_all(config: Config, deps: SyncDeps, runs: list[RootRun]) -> None:
         if run.record.root_id:
             run.documents = {d.rel_path: d for d in deps.state.list_documents(run.record.root_id)}
         try:
-            run.walk = walk_root(
-                Path(run.config.path),
-                build_filter(run.config, config.defaults),
-                scandir=deps.scandir,
-            )
+            run.path_filter = build_filter(run.config, config.defaults)
+            run.walk = walk_root(Path(run.config.path), run.path_filter, scandir=deps.scandir)
         except RootUnavailableError as exc:
             raise StopRun(
                 ExitCode.CONFIG_OR_STATE,
@@ -511,6 +510,17 @@ def _process_file(
     report.pushed += 1
 
 
+def _in_excluded_dir(run: RootRun, rel_path: str) -> bool:
+    """The file exists on disk below a folder that the filters exclude."""
+    if run.path_filter is None:
+        return False
+    parts = rel_path.split("/")
+    for depth in range(1, len(parts)):
+        if run.path_filter.check_dir("/".join(parts[:depth])) is not None:
+            return os.path.lexists(os.path.join(run.config.path, *parts))
+    return False
+
+
 def _diff_skipped_and_missing(deps: SyncDeps, options: SyncOptions, run: RootRun) -> None:
     """Queue deletes for deliberate skips and for files proven absent."""
     walk = run.walk
@@ -543,7 +553,12 @@ def _diff_skipped_and_missing(deps: SyncDeps, options: SyncOptions, run: RootRun
     for rel_path, old in run.documents.items():
         if rel_path in present or walk.is_unknown(rel_path):
             continue  # invariant I1: unknown is never treated as absent
-        if may_be_in_onyx(old):
+        if may_be_in_onyx(old) and _in_excluded_dir(run, rel_path):
+            # The walk does not descend into excluded folders. The file is
+            # still there, so this is a deliberate skip, not an absence.
+            _count_skip(run.report, SkipReason.EXCLUDED)
+            run.pending.append(PendingDelete(old, SkipReason.EXCLUDED.value))
+        elif may_be_in_onyx(old):
             absent.append(old)
         elif not options.dry_run:
             deps.state.delete_document(root_id, rel_path)
