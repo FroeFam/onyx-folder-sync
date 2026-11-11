@@ -439,8 +439,9 @@ def _process_file(
     if sticky is not None:
         _count_skip(report, sticky)
         row = replace(base, skip_reason=sticky)
-        if old is not None and old.has_document:
+        if old is not None and may_be_in_onyx(old):
             # The document goes, under the guard; the row changes only after that.
+            # A row with an unconfirmed push counts: Onyx may hold its document.
             run.pending.append(PendingDelete(old, sticky.value, replacement=row))
         else:
             deps.state.upsert_document(row)

@@ -193,6 +193,26 @@ def test_reconcile_and_forget(env: Env, capsys: pytest.CaptureFixture[str]) -> N
     assert "root 'docs' (" not in capsys.readouterr().out
 
 
+def test_unconfirmed_push_that_turns_empty_still_gets_a_delete(env: Env) -> None:
+    # The push failed, so Onyx may or may not hold the document. When the file
+    # then extracts to no text, the possible document must still be removed.
+    env.tree.file("one.txt", "first")
+    env.onyx.fail_next("POST", "/onyx-api/ingestion", 400, body={"error_code": "INVALID_INPUT"})
+    assert env.run("sync") == ExitCode.DOCUMENT_FAILURES
+    env.tree.touch_changed("one.txt", "")
+    assert env.run("sync") == ExitCode.OK
+    assert len(env.onyx.requests_matching("DELETE", "")) == 1
+    state = open_state(env.state_path)
+    (row,) = state.list_documents(state.list_roots()[0].root_id)
+    state.close()
+    assert row.skip_reason == "no-text"
+    assert row.onyx_id is None
+    assert row.last_error is None
+    # Settled: the next run sends nothing.
+    assert env.run("sync") == ExitCode.OK
+    assert len(env.onyx.requests_matching("DELETE", "")) == 1
+
+
 def test_extract_report(env: Env, capsys: pytest.CaptureFixture[str]) -> None:
     env.tree.file("one.txt", "first")
     env.tree.file("empty.md", "")
