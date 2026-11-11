@@ -63,7 +63,7 @@ reconcile.py, roots.py (package 7)
     reconcile_root(config: Config, deps: SyncDeps, root_name: str, *,
                    delete_excluded: bool = False,
                    allow_deletes: int | None = None) -> SyncReport
-    forget_root(deps: SyncDeps, root_name: str) -> None
+    forget_root(deps: SyncDeps, root_name: str, *, state_only: bool = False) -> None
     rename_root(deps: SyncDeps, old: str, new: str) -> None
 
 cli.py (package 7)
