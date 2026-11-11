@@ -1,11 +1,16 @@
 ARG PYTHON_TAG=3.12
 FROM python:${PYTHON_TAG}-slim AS builder
 
-WORKDIR /build
-COPY pyproject.toml README.md LICENSE ./
-COPY src/ src/
-RUN pip install --no-cache-dir --prefix=/install .
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /bin/uv
 
+WORKDIR /build
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY src/ src/
+# Install exactly the dependency versions in uv.lock (what CI tested), then the
+# project itself without re-resolving its dependencies.
+RUN uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+    && pip install --no-cache-dir --prefix=/install -r requirements.txt \
+    && pip install --no-cache-dir --prefix=/install --no-deps .
 FROM python:${PYTHON_TAG}-slim
 
 COPY --from=builder /install /usr/local
