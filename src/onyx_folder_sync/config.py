@@ -77,14 +77,39 @@ def _check_roots(config: Config) -> None:
                 "root names are compared case-insensitively"
             )
         seen[key] = root.name
-    parts = [(root.name, _normalized_parts(root.path)) for root in config.roots]
-    for i, (name_a, a) in enumerate(parts):
-        for name_b, b in parts[i + 1 :]:
+    parts = [
+        (root.name, _normalized_parts(root.path), _identity_chain(root.path))
+        for root in config.roots
+    ]
+    for i, (name_a, a, ids_a) in enumerate(parts):
+        for name_b, b, ids_b in parts[i + 1 :]:
             n = min(len(a), len(b))
-            if a[:n] == b[:n]:
+            same_dir = (ids_a[0] is not None and ids_a[0] in ids_b) or (
+                ids_b[0] is not None and ids_b[0] in ids_a
+            )
+            if a[:n] == b[:n] or same_dir:
                 raise ConfigError(
                     f"roots '{name_a}' and '{name_b}' are equal, nested or overlapping"
                 )
+
+
+def _identity_chain(path: str) -> list[tuple[int, int] | None]:
+    """(device, inode) of the directory and of each of its ancestors.
+
+    Path text alone misses two spellings of one directory: a case-insensitive
+    mount on a case-sensitive host, a symlink, a second mount of one share.
+    None stands for a directory that cannot be read or has no stable identity.
+    """
+    absolute = Path(os.path.abspath(path))
+    chain: list[tuple[int, int] | None] = []
+    for directory in (absolute, *absolute.parents):
+        try:
+            st = os.stat(directory)
+        except OSError:
+            chain.append(None)
+            continue
+        chain.append((st.st_dev, st.st_ino) if st.st_ino else None)
+    return chain
 
 
 def load_config(path: Path) -> Config:

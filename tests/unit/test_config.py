@@ -109,6 +109,34 @@ def test_overlap_case_insensitive_on_windows(tmp_path: Path) -> None:
         load_config(write(tmp_path, base(tmp_path, roots)))
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="needs a case-insensitive filesystem")
+def test_overlap_found_by_directory_identity_when_spelling_differs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Stands in for a case-insensitive share mounted on a case-sensitive host,
+    # where the path text gives no hint that both spellings are one directory.
+    (tmp_path / "Data" / "sub").mkdir(parents=True)
+    monkeypatch.setattr("os.path.normcase", lambda p: p)
+    roots = [
+        {"name": "one", "path": str(tmp_path / "Data")},
+        {"name": "two", "path": str(tmp_path / "data" / "sub")},
+    ]
+    with pytest.raises(ConfigError, match="nested or overlapping"):
+        load_config(write(tmp_path, base(tmp_path, roots)))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_overlap_through_a_symlink_rejected(tmp_path: Path) -> None:
+    (tmp_path / "real" / "sub").mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(tmp_path / "real", target_is_directory=True)
+    roots = [
+        {"name": "one", "path": str(tmp_path / "real")},
+        {"name": "two", "path": str(tmp_path / "alias" / "sub")},
+    ]
+    with pytest.raises(ConfigError, match="nested or overlapping"):
+        load_config(write(tmp_path, base(tmp_path, roots)))
+
+
 def test_token_in_file_rejected(tmp_path: Path) -> None:
     data = base(tmp_path)
     data["onyx"]["token"] = "secret-value-123"  # noqa: S105
