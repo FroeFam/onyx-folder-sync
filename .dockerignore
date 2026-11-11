@@ -1,9 +1,17 @@
 .git
 .github
+.claude
 .venv
 .mypy_cache
 .pytest_cache
 .ruff_cache
 __pycache__
+*.py[cod]
 tests
 dist
+build
+*.egg-info
+.env
+*.db
+.vscode
+.idea
