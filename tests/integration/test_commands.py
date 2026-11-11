@@ -85,12 +85,22 @@ def test_dry_run_writes_nothing(env: Env, capsys: pytest.CaptureFixture[str]) ->
     assert env.onyx.documents == {}
     assert env.onyx.entries == {}
     assert [r.method for r in env.onyx.requests] == ["GET"]
+    assert not env.state_path.parent.exists()
+
+    # With existing state, a dry run leaves it untouched.
+    assert env.run("sync") == ExitCode.OK
+    env.tree.file("two.txt", "second")
+    env.tree.remove("one.txt")
     state = open_state(env.state_path)
-    try:
-        assert state.list_roots() == []
-        assert state.last_run() is None
-    finally:
-        state.close()
+    before = (state.list_documents(state.list_roots()[0].root_id), state.last_run())
+    state.close()
+    requests = len(env.onyx.requests)
+    assert env.run("sync", "--dry-run") == ExitCode.OK
+    assert "push   two.txt" in capsys.readouterr().out
+    state = open_state(env.state_path)
+    assert (state.list_documents(state.list_roots()[0].root_id), state.last_run()) == before
+    state.close()
+    assert [r.method for r in env.onyx.requests[requests:]] == ["GET", "GET"]
 
 
 def test_delete_guard_blocks_then_allows(env: Env, capsys: pytest.CaptureFixture[str]) -> None:

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import sys
 import time
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Annotated
 
@@ -138,7 +139,7 @@ def _config_path(ctx: typer.Context) -> Path:
 
 @contextmanager
 def _session(
-    ctx: typer.Context, *, token_optional: bool = False
+    ctx: typer.Context, *, token_optional: bool = False, read_only: bool = False
 ) -> Iterator[tuple[Config, SyncDeps]]:
     """Config, lock, state, client and extraction runner for one command.
 
@@ -146,7 +147,9 @@ def _session(
     """
     config = load_config(_config_path(ctx))
     state_path = Path(config.state_path)
-    with acquire_lock(state_path):
+    # A dry run before the first sync must not create the state or lock file.
+    transient = read_only and not state_path.exists()
+    with nullcontext() if transient else acquire_lock(state_path):
         onyx: OnyxApi
         try:
             onyx = create_client(config.onyx.url, read_token(os.environ))
@@ -154,7 +157,7 @@ def _session(
             if not token_optional:
                 raise
             onyx = _NoOnyx()
-        state = open_state(state_path)
+        state = open_state(Path(":memory:") if transient else state_path)
         runner = create_runner(
             timeout_seconds=config.defaults.extract_timeout_seconds,
             memory_mb=config.defaults.extract_memory_mb,
@@ -180,7 +183,7 @@ def _guarded(action: Callable[[], int]) -> int:
     except OnyxError as exc:
         _log(f"Onyx request failed: {exc}")
         return ExitCode.DOCUMENT_FAILURES
-    except (ConfigError, StateError, RootUnavailableError) as exc:
+    except (ConfigError, StateError, RootUnavailableError, sqlite3.Error) as exc:
         _log(f"error: {exc}")
         return ExitCode.CONFIG_OR_STATE
     except FolderSyncError as exc:
@@ -232,7 +235,7 @@ def sync(
         seconds = parse_interval(interval)
         if loop and dry_run:
             raise ConfigError("--loop and --dry-run cannot be combined")
-        with _session(ctx, token_optional=dry_run) as (config, deps):
+        with _session(ctx, token_optional=dry_run, read_only=dry_run) as (config, deps):
             options = SyncOptions(dry_run=dry_run, repush=repush, allow_deletes=allow_deletes)
             while True:
                 report = run_sync(config, deps, options)

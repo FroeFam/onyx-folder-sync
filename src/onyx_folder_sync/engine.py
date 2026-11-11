@@ -8,9 +8,11 @@ deleted when the run stopped early or when the guard blocked any root.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
+import sqlite3
 import stat
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -27,6 +29,7 @@ from onyx_folder_sync.interfaces import (
     OnyxRequestError,
     OnyxTransportError,
     RootUnavailableError,
+    StateError,
     SyncDeps,
 )
 from onyx_folder_sync.models import (
@@ -35,6 +38,7 @@ from onyx_folder_sync.models import (
     MISSING_WALKS_BEFORE_DELETE,
     Config,
     DocumentRecord,
+    EntryInfo,
     ExitCode,
     FileEntry,
     OnyxDocument,
@@ -59,6 +63,14 @@ MAX_ERROR_CHARS = 300
 
 # Rows with these reasons and an unchanged file need no new extraction.
 _STICKY_SKIPS = frozenset({SkipReason.NO_TEXT, SkipReason.TEXT_TOO_LARGE})
+
+
+PUSH_PENDING = "push pending"
+
+
+def may_be_in_onyx(row: DocumentRecord) -> bool:
+    """Onyx holds a document for this row, or a push of it may have arrived."""
+    return row.has_document or (row.skip_reason is None and row.last_error is not None)
 
 
 class StopRun(Exception):  # noqa: N818
@@ -86,6 +98,8 @@ class RootRun:
     walk: WalkResult | None = None
     documents: dict[str, DocumentRecord] = field(default_factory=dict)
     pending: list[PendingDelete] = field(default_factory=list)
+    # Documents in Onyx per state when the run started; the delete guard's base.
+    documents_at_start: int = 0
 
     @property
     def total_documents(self) -> int:
@@ -188,7 +202,12 @@ def check_entry(deps: SyncDeps, record: RootRecord) -> None:
     """Invariant I10: the root's entry is ours and can never be pruned."""
     if record.cc_pair_id is None:
         raise StopRun(ExitCode.CONFIG_OR_STATE, f"root '{record.name}' has no Onyx entry")
-    info = deps.onyx.get_entry(record.cc_pair_id)
+    _validate_entry(deps, record, record.cc_pair_id, deps.onyx.get_entry(record.cc_pair_id))
+
+
+def _validate_entry(
+    deps: SyncDeps, record: RootRecord, cc_pair_id: int, info: EntryInfo | None
+) -> None:
     problem = None
     if info is None:
         problem = "no longer exists in Onyx"
@@ -201,7 +220,7 @@ def check_entry(deps: SyncDeps, record: RootRecord) -> None:
     if problem:
         raise StopRun(
             ExitCode.CONFIG_OR_STATE,
-            f"root '{record.name}': Onyx entry {record.cc_pair_id} {problem}. "
+            f"root '{record.name}': Onyx entry {cc_pair_id} {problem}. "
             f"Fix it in Onyx or run 'forget {record.name}'.",
         )
 
@@ -209,6 +228,9 @@ def check_entry(deps: SyncDeps, record: RootRecord) -> None:
 def create_entry(deps: SyncDeps, record: RootRecord) -> RootRecord:
     cc_pair_id = deps.onyx.create_entry(entry_name(record.name, deps.state.instance_id()))
     info = deps.onyx.get_entry(cc_pair_id)
+    # Checked before the entry is stored, so nothing is ever pushed into an
+    # entry that Onyx created with pruning on or under another name.
+    _validate_entry(deps, record, cc_pair_id, info)
     if info is None:
         raise StopRun(ExitCode.CONFIG_OR_STATE, f"new Onyx entry {cc_pair_id} cannot be read")
     deps.state.set_root_entry(record.root_id, cc_pair_id, info.connector_id, info.credential_id)
@@ -295,11 +317,12 @@ def walk_all(config: Config, deps: SyncDeps, runs: list[RootRun]) -> None:
                 "nothing pushed, nothing deleted",
             ) from exc
         run.report.unknown_subtrees = list(run.walk.errored_dirs)
-        if not run.walk.eligible and run.total_documents:
+        run.documents_at_start = run.total_documents
+        if not run.walk.eligible:
             raise StopRun(
                 ExitCode.CONFIG_OR_STATE,
-                f"root '{run.config.name}' has no eligible files but {run.total_documents} "
-                "documents in state; nothing pushed, nothing deleted",
+                f"root '{run.config.name}' has no eligible files ({run.total_documents} "
+                "documents in state); nothing pushed, nothing deleted",
             )
 
 
@@ -341,7 +364,7 @@ def _record_error(
     """Store an error; an existing document and its proof of ownership stay."""
     old = run.documents.get(entry.rel_path)
     if old is not None:
-        row = replace(old, last_error=error, missing_count=0)
+        row = replace(old, last_error=error)
     else:
         row = DocumentRecord(
             root_id=run.record.root_id,
@@ -373,7 +396,8 @@ def _process_file(
             report.unchanged += 1
         return
     age = deps.now().timestamp() - entry.mtime_ns / 1e9
-    if 0 <= age < config.defaults.settle_minutes * 60:
+    # A slightly negative age is clock skew between this host and the share.
+    if -86400 < age < config.defaults.settle_minutes * 60:
         _count_skip(report, SkipReason.SETTLING)
         return
     if options.dry_run:
@@ -443,6 +467,15 @@ def _process_file(
 
     if run.record.cc_pair_id is None:
         raise StopRun(ExitCode.CONFIG_OR_STATE, f"root '{run.config.name}' has no Onyx entry")
+    # Written before the request: if the push reaches Onyx but its answer or
+    # the state write after it is lost, state still knows that Onyx may hold
+    # this id, and the cleared hash forces a new push of whatever is on disk.
+    if old is not None:
+        attempt = replace(old, payload_hash=None, last_error=PUSH_PENDING)
+    else:
+        attempt = replace(base, extractor_version=None, last_error=PUSH_PENDING)
+    deps.state.upsert_document(attempt)
+    run.documents[entry.rel_path] = attempt
     pacer.before_request()
     started = deps.now()
     try:
@@ -491,12 +524,18 @@ def _diff_skipped_and_missing(deps: SyncDeps, options: SyncOptions, run: RootRun
         old = run.documents.get(skipped.rel_path)
         if old is None or skipped.reason not in DELIBERATE_SKIPS:
             continue
-        if old.has_document:
+        if may_be_in_onyx(old):
             run.pending.append(PendingDelete(old, skipped.reason.value))
         elif not options.dry_run:
             deps.state.delete_document(root_id, skipped.rel_path)
 
-    returned = [p for p in present if p in run.documents and run.documents[p].missing_count]
+    # Seen again, or not seen for certain: either way the count of consecutive
+    # absences starts over (invariant I2).
+    returned = [
+        p
+        for p, row in run.documents.items()
+        if row.missing_count and (p in present or walk.is_unknown(p))
+    ]
     if returned and not options.dry_run:
         deps.state.clear_missing(root_id, returned)
 
@@ -504,7 +543,7 @@ def _diff_skipped_and_missing(deps: SyncDeps, options: SyncOptions, run: RootRun
     for rel_path, old in run.documents.items():
         if rel_path in present or walk.is_unknown(rel_path):
             continue  # invariant I1: unknown is never treated as absent
-        if old.has_document:
+        if may_be_in_onyx(old):
             absent.append(old)
         elif not options.dry_run:
             deps.state.delete_document(root_id, rel_path)
@@ -533,7 +572,7 @@ def guard_allows(config: Config, options_allow: int | None, runs: list[RootRun])
         for r in runs
         if not evaluate_guard(
             len(r.pending),
-            r.total_documents,
+            r.documents_at_start,
             max_delete_fraction=config.defaults.max_delete_fraction,
         )
     ]
@@ -546,14 +585,13 @@ def execute_deletes(deps: SyncDeps, run: RootRun, pacer: RequestPacer) -> None:
     root_id = run.record.root_id
     for item in run.pending:
         current = deps.state.get_document(root_id, item.record.rel_path)
-        onyx_id = item.record.onyx_id
-        # Invariant I4: only ids with our prefix that state holds for this root.
-        if (
-            current is None
-            or onyx_id is None
-            or current.onyx_id != onyx_id
-            or not onyx_id.startswith(ID_PREFIX)
-        ):
+        # Invariant I4: only ids with our prefix that state holds for this
+        # root. A row whose push may have reached Onyx has no stored id yet;
+        # its id is the one derived from the row itself.
+        if current is None or not may_be_in_onyx(current):
+            continue
+        onyx_id = current.onyx_id or document_id(root_id, current.rel_path)
+        if not onyx_id.startswith(ID_PREFIX):
             continue
         pacer.before_request()
         try:
@@ -626,12 +664,23 @@ def _run(config: Config, deps: SyncDeps, options: SyncOptions, report: SyncRepor
         report.messages.append("Onyx is unreachable; nothing done")
         return
     report.roots = [r.report for r in runs]
-    walk_all(config, deps, runs)
+    try:
+        walk_all(config, deps, runs)
+    except StopRun:
+        # No root was diffed, so this run proves nothing about absence.
+        if not options.dry_run:
+            for run in runs:
+                rows = deps.state.list_documents(run.record.root_id)
+                stale = [r.rel_path for r in rows if r.missing_count]
+                if stale:
+                    deps.state.clear_missing(run.record.root_id, stale)
+        raise
+    for run in runs:
+        _diff_skipped_and_missing(deps, options, run)
     pacer = RequestPacer(deps, config.onyx.request_pause_seconds)
     for run in runs:
         if run.walk is None:
             continue
-        _diff_skipped_and_missing(deps, options, run)
         for entry in run.walk.eligible:
             _process_file(config, deps, options, run, pacer, entry)
     finish_deletes(
@@ -653,14 +702,18 @@ def run_sync(config: Config, deps: SyncDeps, options: SyncOptions) -> SyncReport
     except StopRun as stop:
         report.exit_code = stop.code
         report.messages.append(stop.message)
+    except (sqlite3.Error, StateError) as exc:
+        report.exit_code = ExitCode.CONFIG_OR_STATE
+        report.messages.append(f"state database error: {short_error(exc)}")
     if report.exit_code == ExitCode.OK and any(r.failed for r in report.roots):
         report.exit_code = ExitCode.DOCUMENT_FAILURES
     if run_id is not None:
-        deps.state.finish_run(
-            run_id,
-            iso_utc(deps.now()),
-            report.counts,
-            int(report.exit_code),
-            report.blocked_deletes,
-        )
+        with contextlib.suppress(sqlite3.Error, StateError):
+            deps.state.finish_run(
+                run_id,
+                iso_utc(deps.now()),
+                report.counts,
+                int(report.exit_code),
+                report.blocked_deletes,
+            )
     return report
