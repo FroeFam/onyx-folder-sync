@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    uses: FroeFam/ci-pipeline/.github/workflows/build-test.yml@feat/python-checks-and-uv
+    uses: FroeFam/ci-pipeline/.github/workflows/build-test.yml@v1
     with:
       language: python
       python-version: '3.12'
