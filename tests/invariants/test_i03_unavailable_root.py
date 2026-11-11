@@ -106,8 +106,12 @@ def test_i3_one_unavailable_root_stops_the_whole_run_before_any_push_or_delete(e
     }
 
 
-def test_i3_fresh_state_with_empty_root_is_not_an_error_for_existing_documents(env: Env) -> None:
-    """Zero eligible files only aborts when state holds documents (plan 5.2 step 3)."""
+def test_i3_fresh_state_with_empty_root_stops_the_run(env: Env) -> None:
+    """Zero eligible files stops the run even when state holds no documents.
+
+    Plan 5.2 step 3 only names the case with documents in state; I3 is the
+    stricter text and wins (orchestrator and user decision, 2026-11-11).
+    """
     report = env.run()
-    assert report.exit_code == ExitCode.OK
+    assert report.exit_code == ExitCode.CONFIG_OR_STATE
     assert env.delete_ids() == []

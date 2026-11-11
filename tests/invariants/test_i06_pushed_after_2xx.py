@@ -106,7 +106,9 @@ def test_i6_changed_file_keeps_its_old_onyx_id_when_the_new_push_fails(env: Env)
     assert report.roots[0].failed == 1
     row = env.documents()["a.txt"]
     assert row.onyx_id == first.onyx_id  # still proves ownership of the old document
-    assert row.payload_hash == first.payload_hash  # not recorded as pushed
+    # The hash is cleared before the request, so the new content is never
+    # recorded as pushed and the next run pushes again.
+    assert row.payload_hash is None
     assert env.onyx_content()["a.txt"] == "version one"
     report = env.run()
     assert report.exit_code == ExitCode.OK
@@ -132,4 +134,7 @@ def test_i6_entry_lost_between_preflight_and_push_marks_nothing(env: Env) -> Non
     assert dropped
     assert report.exit_code != ExitCode.OK
     assert violations == []
-    assert env.documents()["doc0000.txt"].payload_hash == before["doc0000.txt"].payload_hash
+    row = env.documents()["doc0000.txt"]
+    # The pending row keeps the old id (ownership) and holds no hash (not pushed).
+    assert row.onyx_id == before["doc0000.txt"].onyx_id
+    assert row.payload_hash is None
